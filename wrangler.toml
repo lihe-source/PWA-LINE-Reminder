@@ -1,0 +1,17 @@
+name = "rex-line-reminder"
+main = "worker.js"
+compatibility_date = "2026-09-29"
+workers_dev = true
+
+[triggers]
+crons = ["* * * * *"]
+
+[[d1_databases]]
+binding = "DB"
+database_name = "rex-line-reminder"
+database_id = "REPLACE_WITH_YOUR_D1_DATABASE_ID"
+
+[vars]
+APP_ORIGIN = "https://lihe-source.github.io"
+OWNER_EMAIL = "REPLACE_WITH_YOUR_GOOGLE_EMAIL"
+GOOGLE_CLIENT_ID = "REPLACE_WITH_YOUR_WEB_CLIENT_ID.apps.googleusercontent.com"

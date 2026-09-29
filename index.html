@@ -1,0 +1,29 @@
+<!doctype html><html lang="zh-Hant"><head>
+<meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="theme-color" content="#0b1218"><meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<link rel="manifest" href="manifest.webmanifest"><link rel="icon" href="icon.svg" type="image/svg+xml"><link rel="apple-touch-icon" href="icon-180.png">
+<title>Rex LINE 提醒</title><link rel="stylesheet" href="styles.css">
+<script src="config.js"></script><script src="https://accounts.google.com/gsi/client" async defer></script>
+<script type="module" src="app.js"></script>
+</head><body>
+<div id="login" class="login-page"><div class="login-card"><img src="icon.svg" alt="LINE 提醒圖示"><span class="eyebrow">PERSONAL REMINDER</span><h1>把重要的事，交給準時的提醒。</h1><p>只有 Rex 的 Google 帳戶可以建立與管理提醒。</p><div id="google-button"></div><p id="login-error" class="error" role="alert"></p></div></div>
+<div id="app" class="app hidden">
+ <header class="topbar"><div class="brand"><img src="icon.svg" alt=""><div><strong>Rex LINE 提醒</strong><small>台灣時間 · 24 小時制</small></div></div><span class="version" id="header-version">V1.0.0</span></header>
+ <main class="main">
+  <section id="page-home" class="page active">
+   <div class="hero"><span class="eyebrow">YOUR MOMENTS, ON TIME</span><h1>今天，有什麼要記得？</h1><p id="today-label"></p></div>
+   <div class="composer"><button id="mic-btn" class="mic-btn" aria-label="開啟語音對話"><svg viewBox="0 0 48 48" aria-hidden="true"><rect x="18" y="7" width="12" height="24" rx="6" fill="currentColor"/><path d="M12 23a12 12 0 0 0 24 0M24 35v6m-8 0h16" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round"/></svg></button><div class="mode-title" id="voice-status">點一下，開始語音對話</div><p class="muted">AI 會先向你打招呼，並用語音確認提醒。</p><button id="keyboard-btn" class="keyboard-btn"><span>⌨</span> 改用鍵盤輸入</button></div>
+   <div id="text-panel" class="panel hidden"><label for="typed-input">想提醒的事</label><textarea id="typed-input" rows="3" placeholder="例如：下週三早上十點提醒我去繳信用卡卡費"></textarea><button id="interpret-btn" class="primary">讓 AI 整理提醒</button><p class="muted">也可使用下方的手動建立表單。</p></div>
+   <div id="conversation" class="conversation hidden" aria-live="polite"></div>
+   <div id="draft" class="panel draft hidden"><div class="panel-title"><span class="eyebrow">確認後才建立</span><h2>提醒確認</h2></div><label for="draft-recipient">收件人</label><select id="draft-recipient"></select><label for="draft-message">提醒內容</label><textarea id="draft-message" rows="2" maxlength="500"></textarea><label for="draft-due">台灣時間（24 小時制）</label><input id="draft-due" type="datetime-local" step="60"><p id="draft-hint" class="muted"></p><div class="row"><button id="discard-btn" class="secondary">取消</button><button id="confirm-btn" class="primary">確認建立</button></div></div>
+   <div class="section-head"><h2>接下來</h2><button id="manual-btn" class="text-button">＋ 手動建立</button></div><div id="upcoming" class="task-list"></div>
+  </section>
+  <section id="page-calendar" class="page"><div class="section-head"><div><span class="eyebrow">SCHEDULE</span><h1>行事曆</h1></div></div><div class="calendar panel"><div class="calendar-head"><button id="prev-month" aria-label="上個月">‹</button><h2 id="calendar-title"></h2><button id="next-month" aria-label="下個月">›</button></div><div class="weekdays"><span>日</span><span>一</span><span>二</span><span>三</span><span>四</span><span>五</span><span>六</span></div><div id="calendar-grid" class="calendar-grid"></div></div><h2 id="selected-date-title"></h2><div id="day-tasks" class="task-list"></div></section>
+  <section id="page-people" class="page"><span class="eyebrow">PEOPLE</span><h1>收件人</h1><p class="muted">對方先加入你的 LINE 官方帳號，再傳送一次配對訊息。</p><div class="panel"><label for="pair-name">對方的稱呼</label><input id="pair-name" placeholder="例如：小明" maxlength="40"><button id="pair-btn" class="primary">產生配對碼</button><div id="pair-result" class="pair-result hidden"></div></div><h2>已配對</h2><div id="contacts" class="task-list"></div></section>
+  <section id="page-settings" class="page"><span class="eyebrow">PREFERENCES</span><h1>設定</h1><div class="panel settings-row"><div><strong>台灣時間</strong><p class="muted">Asia/Taipei · 固定 UTC+8 · 24 小時制</p></div></div><div class="panel settings-row"><div><strong>外觀</strong><p class="muted">深色／淺色</p></div><button id="theme-btn" class="secondary">切換</button></div><div class="panel"><strong>版本更新</strong><p class="muted">目前版本：<span id="current-version">1.0.0</span><br>最新版本：<span id="latest-version">檢查中</span></p><button id="update-btn" class="secondary">檢查更新</button></div><div class="panel"><strong>LINE 本月訊息用量</strong><p id="quota-label" class="muted">讀取中</p><button id="refresh-btn" class="secondary">重新整理</button></div><button id="logout-btn" class="text-button">登出</button></section>
+ </main>
+ <nav class="bottom-nav" aria-label="主選單"><button data-page="home" class="active"><span>●</span>首頁</button><button data-page="calendar"><span>▦</span>行事曆</button><button data-page="people"><span>♧</span>收件人</button><button data-page="settings"><span>⚙</span>設定</button></nav>
+</div>
+<div id="toast" class="toast hidden" role="status"></div>
+</body></html>
