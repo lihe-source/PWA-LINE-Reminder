@@ -128,16 +128,33 @@ async function removeContact(env, id) {
   return result.meta.changes ? json({ ok: true }) : fail(404, '找不到收件人。');
 }
 async function token(env) {
-  if (!env.GEMINI_API_KEY) return fail(503, '尚未設定 Gemini 金鑰。');
+  const apiKey = clean(env.GEMINI_API_KEY);
+  if (!apiKey) return fail(503, '尚未設定 Gemini 金鑰。');
   const t = Date.now();
-  const r = await fetch('https://generativelanguage.googleapis.com/v1beta/auth_tokens', {
-    method: 'POST', headers: { 'x-goog-api-key': env.GEMINI_API_KEY, 'content-type': 'application/json' },
+  let r;
+  try { r = await fetch('https://generativelanguage.googleapis.com/v1beta/auth_tokens', {
+    method: 'POST', headers: { 'x-goog-api-key': apiKey, 'content-type': 'application/json' },
     body: JSON.stringify({ uses: 1, expireTime: new Date(t+15*60000).toISOString(),
       newSessionExpireTime: new Date(t+60000).toISOString(),
-      liveConnectConstraints: { model: 'models/gemini-3.8-live', config: { responseModalities: ['AUDIO'] } } })
-  });
-  const result = await r.json();
-  return r.ok && result.name ? json({ token: result.name }) : fail(502, 'Gemini 語音連線失敗，請檢查免費額度或金鑰。');
+      // REST AuthToken fields differ from the Google SDK's liveConnectConstraints.
+      // Lock only the model so the browser's audio, tools and instructions still apply.
+      bidiGenerateContentSetup: { model: 'models/gemini-3.8-live' }, fieldMask: 'model' })
+  }); } catch { return fail(502, '雲端暫時無法連接 Google，請稍後重試。'); }
+  const result = await r.json().catch(()=>null);
+  if (r.ok && typeof result?.name === 'string' && result.name) return json({ token: result.name });
+  const hints = {
+    400: 'Google 無法接受語音連線設定，請確認雲端已更新至 V1.0.2。',
+    401: 'Gemini 金鑰未通過驗證，請重新複製金鑰到 Cloudflare Secret。',
+    403: 'Google 拒絕存取，請確認金鑰專案已啟用 Gemini API，且具有使用權限。',
+    404: 'Google 找不到指定的語音服務或模型，請確認該專案可以使用 Gemini 3.8 Live。',
+    429: 'Google 使用額度或請求頻率已達限制，請先到 AI Studio 查看用量；不用立即啟用付款。'
+  };
+  const status = /^[A-Z_]+$/.test(result?.error?.status||'') ? result.error.status : '';
+  const raw = String(result?.error?.message||'').split(apiKey).join('[已隱藏金鑰]')
+    .replace(/AIza[\w-]+/g,'[已隱藏金鑰]').replace(/auth_tokens\/[^\s"']+/g,'[已隱藏連線資格]')
+    .replace(/[\r\n]+/g,' ').slice(0,300);
+  const hint = hints[r.status] || (r.ok ? 'Google 沒有回傳有效的語音連線資格。' : 'Google 服務暫時無法使用，請稍後重試。');
+  return json({ error: hint, details: `Google ${r.status}${status?'（'+status+'）':''}${raw?'：'+raw:''}` },502);
 }
 async function webhook(request, env) {
   if (!env.LINE_CHANNEL_SECRET) return fail(503, 'LINE 尚未設定。');

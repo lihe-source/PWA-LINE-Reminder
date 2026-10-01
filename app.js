@@ -1,10 +1,10 @@
 import { LiveConversation } from './live.js';
 const $ = id => document.getElementById(id);
 const C = window.REMINDER_CONFIG;
-const ZONE = 'Asia/Taipei', VERSION = '1.0.1';
+const ZONE = 'Asia/Taipei', VERSION = '1.0.2';
 const state = { token:null, contacts:[],tasks:[],quota:null, draft:null, month:new Date(), day:null, live:null, editing:null };
 let toastTimer;
-function toast(message) { const el=$('toast');el.textContent=message;el.classList.remove('hidden');clearTimeout(toastTimer);toastTimer=setTimeout(()=>el.classList.add('hidden'),4500); }
+function toast(message) { const el=$('toast');el.textContent=message;el.classList.remove('hidden');clearTimeout(toastTimer);toastTimer=setTimeout(()=>el.classList.add('hidden'),message.includes('Google ')?45000:4500); }
 function fmt(iso,opts={}) { return new Intl.DateTimeFormat('zh-TW',{timeZone:ZONE,year:'numeric',month:'2-digit',day:'2-digit',hour:'2-digit',minute:'2-digit',hourCycle:'h23',...opts}).format(new Date(iso)); }
 function dayKey(iso) { const parts=new Intl.DateTimeFormat('en-US',{timeZone:ZONE,year:'numeric',month:'2-digit',day:'2-digit'}).formatToParts(new Date(iso));const get=t=>parts.find(p=>p.type===t).value;return `${get('year')}-${get('month')}-${get('day')}`; }
 function taipeiNow() { return new Date(Date.now()+8*3600000).toISOString().slice(0,16); }
@@ -15,7 +15,7 @@ async function api(path,method='GET',data) {
   const r=await fetch(C.API_URL.replace(/\/$/,'')+path,{method,headers:{Authorization:'Bearer '+state.token,...(data?{'Content-Type':'application/json'}:{})},body:data?JSON.stringify(data):undefined,cache:'no-store'});
   const result=await r.json().catch(()=>({}));
   if(r.status===401){logout('登入已過期，請重新登入。');throw new Error('登入已過期');}
-  if(!r.ok) throw new Error(result.error||`服務回應 ${r.status}`);
+  if(!r.ok) throw new Error((result.error||`服務回應 ${r.status}`)+(result.details?'\n'+result.details:''));
   return result;
 }
 function logout(message='已登出') {
