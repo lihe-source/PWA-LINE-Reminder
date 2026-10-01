@@ -1,7 +1,7 @@
 import { LiveConversation } from './live.js';
 const $ = id => document.getElementById(id);
 const C = window.REMINDER_CONFIG;
-const ZONE = 'Asia/Taipei', VERSION = '1.0.0';
+const ZONE = 'Asia/Taipei', VERSION = '1.0.1';
 const state = { token:null, contacts:[],tasks:[],quota:null, draft:null, month:new Date(), day:null, live:null, editing:null };
 let toastTimer;
 function toast(message) { const el=$('toast');el.textContent=message;el.classList.remove('hidden');clearTimeout(toastTimer);toastTimer=setTimeout(()=>el.classList.add('hidden'),4500); }
@@ -10,7 +10,7 @@ function dayKey(iso) { const parts=new Intl.DateTimeFormat('en-US',{timeZone:ZON
 function taipeiNow() { return new Date(Date.now()+8*3600000).toISOString().slice(0,16); }
 function taipeiToISO(local) { if(!/^\d{4}-\d\d-\d\dT\d\d:\d\d$/.test(local)) return null;const d=new Date(local+':00+08:00');return Number.isNaN(d.getTime())?null:d.toISOString(); }
 function localFromISO(iso) { return new Date(Date.parse(iso)+8*3600000).toISOString().slice(0,16); }
-function configured() { return C.API_URL.startsWith('https://')&&!C.API_URL.includes('REPLACE_')&&!C.GOOGLE_CLIENT_ID.includes('REPLACE_'); }
+function configured() { return C.API_URL.startsWith('https://')&&!C.API_URL.includes('REPLACE_'); }
 async function api(path,method='GET',data) {
   const r=await fetch(C.API_URL.replace(/\/$/,'')+path,{method,headers:{Authorization:'Bearer '+state.token,...(data?{'Content-Type':'application/json'}:{})},body:data?JSON.stringify(data):undefined,cache:'no-store'});
   const result=await r.json().catch(()=>({}));
@@ -18,18 +18,36 @@ async function api(path,method='GET',data) {
   if(!r.ok) throw new Error(result.error||`服務回應 ${r.status}`);
   return result;
 }
-function logout(message='已登出') { state.live?.stop();state.live=null;state.token=null;sessionStorage.removeItem('rex-id-token');$('app').classList.add('hidden');$('login').classList.remove('hidden');if(message) $('login-error').textContent=message; }
-async function authenticate(token) { state.token=token;try { await refresh();sessionStorage.setItem('rex-id-token',token);$('login').classList.add('hidden');$('app').classList.remove('hidden');$('login-error').textContent='';render(); }catch(e){logout(e.message);$('login-error').textContent=e.message;} }
+function logout(message='已登出') {
+  state.live?.stop();state.live=null;state.token=null;state.contacts=[];state.tasks=[];state.quota=null;closeDraft();
+  sessionStorage.removeItem('rex-login-session');localStorage.removeItem('rex-login-session');
+  $('login-password').value='';$('app').classList.add('hidden');$('login').classList.remove('hidden');$('login-error').textContent=message;
+}
+async function authenticate(token) { state.token=token;try { await refresh();$('login').classList.add('hidden');$('app').classList.remove('hidden');$('login-error').textContent='';render();return true; }catch(e){logout(e.message);return false;} }
+async function submitLogin(event) {
+  event.preventDefault();if(!configured())return;
+  const button=$('login-submit');button.disabled=true;button.textContent='登入中…';$('login-error').textContent='';
+  try {
+    const remember=$('remember-login').checked;
+    const r=await fetch(C.API_URL.replace(/\/$/,'')+'/api/login',{method:'POST',headers:{'Content-Type':'application/json'},cache:'no-store',body:JSON.stringify({username:$('login-username').value.trim(),password:$('login-password').value,remember})});
+    const result=await r.json().catch(()=>({}));
+    if(!r.ok)throw new Error(result.error||'登入失敗，請稍後再試。');
+    sessionStorage.removeItem('rex-login-session');localStorage.removeItem('rex-login-session');
+    if(await authenticate(result.token))(remember?localStorage:sessionStorage).setItem('rex-login-session',JSON.stringify({token:result.token,expires_at:result.expires_at}));
+    $('login-password').value='';
+  }catch(e){$('login-error').textContent=e.message==='Failed to fetch'?'無法連接服務，請確認網路與雲端網址。':e.message;}
+  finally{button.disabled=false;button.textContent='登入';}
+}
 function loginInit() {
-  if(!configured()){ $('login-error').textContent='尚未完成設定。請先依安裝說明填寫 config.js，並部署雲端服務。';return; }
-  let count=0;
-  const timer=setInterval(()=>{
-    if(!window.google?.accounts?.id){if(++count>60){clearInterval(timer);$('login-error').textContent='Google 登入載入失敗，請檢查網路或內容封鎖設定。';}return;}
-    clearInterval(timer);
-    google.accounts.id.initialize({client_id:C.GOOGLE_CLIENT_ID,callback:answer=>authenticate(answer.credential),auto_select:true,ux_mode:'popup'});
-    google.accounts.id.renderButton($('google-button'),{theme:'filled_black',size:'large',width:280,text:'signin_with'});
-    const saved=sessionStorage.getItem('rex-id-token');if(saved) authenticate(saved);else google.accounts.id.prompt();
-  },150);
+  sessionStorage.removeItem('rex-id-token');
+  $('login-form').addEventListener('submit',submitLogin);
+  $('show-password').onclick=()=>{const visible=$('login-password').type==='password';$('login-password').type=visible?'text':'password';$('show-password').textContent=visible?'隱藏':'顯示';$('show-password').setAttribute('aria-pressed',String(visible));};
+  if(!configured()){ $('login-error').textContent='尚未完成設定。請先依安裝說明填寫 config.js，並部署雲端服務。';$('login-submit').disabled=true;return; }
+  try {
+    const saved=JSON.parse(localStorage.getItem('rex-login-session')||sessionStorage.getItem('rex-login-session')||'null');
+    if(saved?.token&&Date.parse(saved.expires_at)>Date.now())authenticate(saved.token);
+    else{sessionStorage.removeItem('rex-login-session');localStorage.removeItem('rex-login-session');}
+  }catch{sessionStorage.removeItem('rex-login-session');localStorage.removeItem('rex-login-session');}
 }
 async function refresh(){const data=await api('/api/state');state.tasks=data.tasks||[];state.contacts=data.contacts||[];state.quota=data.quota;render();}
 function textNode(tag,text,className){const el=document.createElement(tag);el.textContent=text;if(className)el.className=className;return el;}
@@ -121,7 +139,7 @@ function wire(){
   $('pair-btn').onclick=async()=>{try{const name=$('pair-name').value.trim();const p=await api('/api/pair','POST',{name});const result=$('pair-result');result.replaceChildren(textNode('span',p.code,'pair-code'),textNode('div',`請「${name}」先加入你的 LINE 官方帳號，在對話中傳送：綁定 ${p.code}`),textNode('small','配對碼 10 分鐘內有效。收到 LINE 的配對完成回覆後，按設定頁重新整理。'));result.classList.remove('hidden');}catch(e){toast(e.message);}};
   $('theme-btn').onclick=()=>{document.body.classList.toggle('light');localStorage.setItem('rex-theme',document.body.classList.contains('light')?'light':'dark');};
   $('update-btn').onclick=()=>updateCheck(true);$('refresh-btn').onclick=async()=>{try{await refresh();toast('資料已更新');}catch(e){toast(e.message);}};
-  $('logout-btn').onclick=()=>{google.accounts.id.disableAutoSelect();logout();};
+  $('logout-btn').onclick=async()=>{try{await api('/api/logout','POST');logout();}catch{logout('已清除此裝置的登入狀態。');}};
   document.addEventListener('visibilitychange',()=>{if(!document.hidden&&state.token)refresh().catch(()=>{});});
 }
 if(localStorage.getItem('rex-theme')==='light')document.body.classList.add('light');

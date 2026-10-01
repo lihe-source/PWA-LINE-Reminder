@@ -13,5 +13,4 @@ database_id = "REPLACE_WITH_YOUR_D1_DATABASE_ID"
 
 [vars]
 APP_ORIGIN = "https://lihe-source.github.io"
-OWNER_EMAIL = "REPLACE_WITH_YOUR_GOOGLE_EMAIL"
-GOOGLE_CLIENT_ID = "REPLACE_WITH_YOUR_WEB_CLIENT_ID.apps.googleusercontent.com"
+# Set LOGIN_USERNAME and LOGIN_PASSWORD_HASH as encrypted secrets in the dashboard.

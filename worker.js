@@ -6,7 +6,41 @@ const fail = (status, message) => json({ error: message }, status);
 const now = () => new Date().toISOString();
 const date = value => Number.isFinite(Date.parse(value || '')) ? new Date(value).toISOString() : null;
 const clean = value => String(value || '').trim();
-const authCache = new Map();
+const hex = bytes => Array.from(new Uint8Array(bytes),b=>b.toString(16).padStart(2,'0')).join('');
+const fromHex = s => new Uint8Array(s.match(/../g).map(v=>parseInt(v,16)));
+const digest = async text => hex(await crypto.subtle.digest('SHA-256',new TextEncoder().encode(text)));
+const authVersion = env => digest(env.LOGIN_USERNAME+'\n'+env.LOGIN_PASSWORD_HASH);
+async function passwordMatches(password, stored) {
+  const parts = stored.split('$');
+  if (parts.length!==4 || parts[0]!=='pbkdf2-sha256' || parts[1]!=='100000' || !/^[a-f0-9]{32}$/.test(parts[2]) || !/^[a-f0-9]{64}$/.test(parts[3])) return false;
+  const key = await crypto.subtle.importKey('raw',new TextEncoder().encode(password),'PBKDF2',false,['deriveBits']);
+  const actual = new Uint8Array(await crypto.subtle.deriveBits({name:'PBKDF2',salt:fromHex(parts[2]),iterations:100000,hash:'SHA-256'},key,256));
+  const expected = fromHex(parts[3]);
+  let difference=0;for(let i=0;i<32;i++)difference|=actual[i]^expected[i];
+  return difference===0;
+}
+async function login(request,env) {
+  if (!env.LOGIN_USERNAME || !/^pbkdf2-sha256\$100000\$[a-f0-9]{32}\$[a-f0-9]{64}$/.test(env.LOGIN_PASSWORD_HASH||'')) return fail(503,'尚未設定登入帳號或密碼驗證資料。請依使用說明設定 Cloudflare Secret。');
+  const b = await body(request);
+  if (typeof b.username!=='string'||typeof b.password!=='string'||b.username.length>64||b.password.length>256) return fail(400,'請輸入帳號與密碼。');
+  const time = Date.now(), cutoff=time-15*60000;
+  const ip = await digest(request.headers.get('CF-Connecting-IP')||'unknown');
+  for (const [key,limit] of [[ip,5],['global',20]]) {
+    await env.DB.prepare(`INSERT INTO auth_limits (key,window_start,attempts) VALUES (?,?,1)
+      ON CONFLICT(key) DO UPDATE SET attempts=CASE WHEN window_start<=? THEN 1 ELSE attempts+1 END,
+      window_start=CASE WHEN window_start<=? THEN excluded.window_start ELSE window_start END`).bind(key,time,cutoff,cutoff).run();
+    const row=await env.DB.prepare('SELECT attempts FROM auth_limits WHERE key=?').bind(key).first();
+    if(row.attempts>limit) return json({error:'嘗試次數過多，請稍候 15 分鐘再登入。'},429,{'retry-after':'900'});
+  }
+  const matched = await passwordMatches(b.password,env.LOGIN_PASSWORD_HASH);
+  if (b.username.trim()!==env.LOGIN_USERNAME || !matched) return fail(401,'帳號或密碼不正確。');
+  const token=hex(crypto.getRandomValues(new Uint8Array(32)));
+  const expires = new Date(time+(b.remember===true?7:1)*86400000).toISOString();
+  await env.DB.prepare('INSERT INTO auth_sessions (token_hash,auth_version,created_at,expires_at) VALUES (?,?,?,?)')
+    .bind(await digest(token),await authVersion(env),now(),expires).run();
+  await env.DB.prepare('DELETE FROM auth_limits WHERE key=?').bind(ip).run();
+  return json({token,expires_at:expires});
+}
 
 function cors(request, env, response) {
   const origin = request.headers.get('Origin');
@@ -20,19 +54,9 @@ function cors(request, env, response) {
 }
 async function owner(request, env) {
   const token = (request.headers.get('Authorization') || '').replace(/^Bearer /i, '');
-  if (!token || token.length > 6000 || !env.OWNER_EMAIL || !env.GOOGLE_CLIENT_ID) return false;
-  const cached = authCache.get(token);
-  if (cached && cached.until > Date.now()) return cached.ok;
-  const response = await fetch('https://oauth2.googleapis.com/tokeninfo?id_token=' + encodeURIComponent(token));
-  if (!response.ok) return false;
-  const info = await response.json();
-  const ok = info.aud === env.GOOGLE_CLIENT_ID &&
-    ['accounts.google.com', 'https://accounts.google.com'].includes(info.iss) &&
-    info.email_verified === 'true' && info.email?.toLowerCase() === env.OWNER_EMAIL.trim().toLowerCase() &&
-    Number(info.exp) * 1000 > Date.now() + 10000;
-  if (authCache.size > 200) authCache.clear();
-  authCache.set(token, { ok, until: Math.min(Date.now() + 60000, Number(info.exp) * 1000) });
-  return ok;
+  if (!/^[a-f0-9]{64}$/.test(token) || !env.LOGIN_USERNAME || !env.LOGIN_PASSWORD_HASH) return false;
+  const session=await env.DB.prepare('SELECT auth_version FROM auth_sessions WHERE token_hash=? AND expires_at>?').bind(await digest(token),now()).first();
+  return !!session && session.auth_version===await authVersion(env);
 }
 async function body(request) {
   if (Number(request.headers.get('Content-Length') || 0) > 16000) throw new Error('內容過長');
@@ -177,6 +201,8 @@ async function sendDue(env) {
   const cutoff = new Date(Date.now()-30*86400000).toISOString();
   await env.DB.prepare(`DELETE FROM tasks WHERE (status='sent' AND sent_at<?) OR (status IN ('cancelled','failed') AND updated_at<?)`).bind(cutoff,cutoff).run();
   await env.DB.prepare('DELETE FROM pairing WHERE expires_at<?').bind(t).run();
+  await env.DB.prepare('DELETE FROM auth_sessions WHERE expires_at<?').bind(t).run();
+  await env.DB.prepare('DELETE FROM auth_limits WHERE window_start<?').bind(Date.now()-86400000).run();
 }
 async function markFailed(env,id,why) {
   await env.DB.prepare(`UPDATE tasks SET status='failed',last_error=?,updated_at=? WHERE id=? AND status='processing'`).bind(why,now(),id).run();
@@ -195,9 +221,15 @@ export default {
       if (path==='/webhook/line' && request.method==='POST') return webhook(request,env);
       if (!path.startsWith('/api/')) return fail(404,'不存在的路徑');
       if (request.headers.get('Origin') && request.headers.get('Origin')!==env.APP_ORIGIN) return fail(403,'來源不符');
-      if (!await owner(request,env)) return cors(request,env,fail(401,'請使用 Rex 指定的 Google 帳戶登入。'));
+      if (path==='/api/login' && request.method==='POST') return cors(request,env,await login(request,env));
+      if (!await owner(request,env)) return cors(request,env,fail(401,'登入已過期，請輸入帳號與密碼重新登入。'));
       let result;
-      if (path==='/api/state' && request.method==='GET') result=await state(env);
+      if (path==='/api/logout' && request.method==='POST') {
+        const token=(request.headers.get('Authorization')||'').replace(/^Bearer /i,'');
+        await env.DB.prepare('DELETE FROM auth_sessions WHERE token_hash=?').bind(await digest(token)).run();
+        result=json({ok:true});
+      }
+      else if (path==='/api/state' && request.method==='GET') result=await state(env);
       else if (path==='/api/tasks' && request.method==='POST') result=await createTask(request,env);
       else if (/^\/api\/tasks\/[\w-]+$/.test(path) && request.method==='PATCH') result=await editTask(request,env,path.split('/')[3]);
       else if (/^\/api\/tasks\/[\w-]+$/.test(path) && request.method==='DELETE') result=await cancelTask(env,path.split('/')[3]);
