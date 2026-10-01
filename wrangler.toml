@@ -1,4 +1,4 @@
-name = "rex-line-reminder"
+name = "pwa-line-reminder"
 main = "worker.js"
 compatibility_date = "2026-09-29"
 workers_dev = true
@@ -9,8 +9,7 @@ crons = ["* * * * *"]
 [[d1_databases]]
 binding = "DB"
 database_name = "rex-line-reminder"
-database_id = "REPLACE_WITH_YOUR_D1_DATABASE_ID"
+database_id = "629b319b-0cb6-4ebe-a684-d524153bf709"
 
 [vars]
 APP_ORIGIN = "https://lihe-source.github.io"
-# Set LOGIN_USERNAME and LOGIN_PASSWORD_HASH as encrypted secrets in the dashboard.
